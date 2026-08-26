@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FHIREngine Assistant</title>
+<style>
+  :root {
+    --ink: #0f2027;
+    --paper: #f4f7f6;
+    --line: #d7e0de;
+    --accent: #0b6e5f;
+    --accent-dark: #084f45;
+    --bot-bubble: #ffffff;
+    --user-bubble: #0b6e5f;
+    --muted: #5b6b68;
+    --danger-bg: #fff4e8;
+    --danger-line: #e8c79a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  .app {
+    max-width: 760px;
+    margin: 0 auto;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #ffffff, #f7faf9);
+  }
+  header .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(11,110,95,0.15);
+  }
+  header h1 {
+    font-size: 17px;
+    margin: 0;
+    letter-spacing: 0.2px;
+  }
+  header p {
+    margin: 4px 0 0 20px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  #chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 20px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .row { display: flex; }
+  .row.bot { justify-content: flex-start; }
+  .row.user { justify-content: flex-end; }
+  .bubble {
+    max-width: 82%;
+    padding: 11px 14px;
+    border-radius: 14px;
+    font-size: 14.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .row.bot .bubble {
+    background: var(--bot-bubble);
+    border: 1px solid var(--line);
+    border-bottom-left-radius: 4px;
+  }
+  .row.user .bubble {
+    background: var(--user-bubble);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .bubble.notfound {
+    background: var(--danger-bg);
+    border: 1px solid var(--danger-line);
+  }
+  .bubble b, .bubble strong { font-weight: 600; }
+  .sources {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--line);
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .sources .src-item { margin-top: 2px; }
+  .typing {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px 2px;
+  }
+  .typing span {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--muted);
+    animation: blink 1.2s infinite ease-in-out;
+  }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+
+  form#composer {
+    display: flex;
+    gap: 8px;
+    padding: 14px 20px 18px;
+    border-top: 1px solid var(--line);
+    background: #fff;
+  }
+  #question {
+    flex: 1;
+    padding: 11px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    font-size: 14.5px;
+    outline: none;
+    font-family: inherit;
+  }
+  #question:focus { border-color: var(--accent); }
+  button#send {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button#send:hover { background: var(--accent-dark); }
+  button#send:disabled { opacity: 0.5; cursor: default; }
+  .hint {
+    text-align: center;
+    font-size: 11px;
+    color: var(--muted);
+    padding-bottom: 8px;
+  }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">
+        <span class="dot"></span>
+        <h1>FHIREngine Assistant</h1>
+      </div>
+      <p>Answers sourced from internal FHIREngine / NCCN documentation</p>
+    </header>
+
+    <div id="chat"></div>
+    <div class="hint">Answers are generated from internal docs and may be incomplete — verify anything critical with the FH team.</div>
+
+    <form id="composer" autocomplete="off">
+      <input id="question" type="text" placeholder="Ask about NCCN norms, FH details..." autofocus />
+      <button id="send" type="submit">Send</button>
+    </form>
+  </div>
+
+<script>
+(function () {
+  const chat = document.getElementById('chat');
+  const form = document.getElementById('composer');
+  const input = document.getElementById('question');
+  const sendBtn = document.getElementById('send');
+
+  const API_URL = '/api/query';
+
+  const WELCOME_HTML = `
+    <p>👋 Hi, I'm the <b>FHIREngine Assistant</b>.</p>
+    <p>I can help answer questions about <b>NCCN norms</b> and <b>FH (FHIREngine) application details</b>, based on our internal documentation.</p>
+    <p><b>Try asking things like:</b></p>
+    <p>&nbsp;&nbsp;• What are the NCCN guidelines for a specific condition?<br>
+    &nbsp;&nbsp;• How does the FH application handle a particular workflow?<br>
+    &nbsp;&nbsp;• Where do I configure X in the FH system?</p>
+    <p>Go ahead, ask me anything!</p>
+  `;
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // Minimal markdown-ish rendering: **bold**, - bullets, newlines -> <br>
+  function renderAnswer(text) {
+    let safe = escapeHtml(text);
+    safe = safe.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    safe = safe.replace(/\n/g, '<br>');
+    return safe;
+  }
+
+  function addRow(role, innerHtml, opts) {
+    opts = opts || {};
+    const row = document.createElement('div');
+    row.className = 'row ' + role;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble' + (opts.notfound ? ' notfound' : '');
+    bubble.innerHTML = innerHtml;
+    row.appendChild(bubble);
+    chat.appendChild(row);
+    chat.scrollTop = chat.scrollHeight;
+    return bubble;
+  }
+
+  function addTyping() {
+    return addRow('bot', '<div class="typing"><span></span><span></span><span></span></div>');
+  }
+
+  function addSources(bubble, sources) {
+    if (!sources || sources.length === 0) return;
+    const box = document.createElement('div');
+    box.className = 'sources';
+    box.innerHTML = '<div>Sources:</div>' + sources.map(function (s) {
+      return '<div class="src-item">• ' + escapeHtml(s.source_path) + ' (chunk ' + s.chunk_index + ', score ' + s.score.toFixed(2) + ')</div>';
+    }).join('');
+    bubble.appendChild(box);
+  }
+
+  const NOT_FOUND_SNIPPET = "don't have that information";
+
+  async function sendQuestion(question) {
+    addRow('user', escapeHtml(question));
+    const typingBubble = addTyping();
+    sendBtn.disabled = true;
+
+    try {
+      const resp = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: question, "top_k": 10 })
+      });
+
+      typingBubble.parentElement.remove();
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        addRow('bot', 'Something went wrong talking to the assistant. Please try again shortly.', { notfound: true });
+        console.error('API error', resp.status, errText);
+        return;
+      }
+
+      const data = await resp.json();
+      const isNotFound = (data.answer || '').toLowerCase().includes(NOT_FOUND_SNIPPET);
+      const bubble = addRow('bot', renderAnswer(data.answer || ''), { notfound: isNotFound });
+      if (!isNotFound) addSources(bubble, data.sources);
+    } catch (err) {
+      typingBubble.parentElement.remove();
+      addRow('bot', 'Could not reach the assistant service. Please try again.', { notfound: true });
+      console.error(err);
+    } finally {
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    const q = input.value.trim();
+    if (!q) return;
+    input.value = '';
+    sendQuestion(q);
+  });
+
+  // Static welcome banner on load -- no API call needed for this part.
+  addRow('bot', WELCOME_HTML);
+})();
+</script>
+</body>
+</html>
